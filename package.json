@@ -1,0 +1,27 @@
+{
+  "name": "infocorebot",
+  "version": "1.0.0",
+  "description": "Discord bot that builds and manages the CCIS Link-Hub server.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "deploy": "node deploy-commands.js",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop ecosystem.config.js",
+    "pm2:restart": "pm2 restart ecosystem.config.js",
+    "pm2:logs": "pm2 logs infocorebot"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@discordjs/rest": "^2.6.1",
+    "better-sqlite3": "^12.11.1",
+    "discord-api-types": "^0.38.49",
+    "discord.js": "^14.26.4",
+    "dotenv": "^17.4.2",
+    "lavalink-client": "^2.10.3",
+    "libsodium-wrappers": "^0.8.4"
+  }
+}
