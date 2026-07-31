@@ -60,18 +60,32 @@ client.commands = new Collection();
 
 // Lavalink handles the actual audio fetching/decoding — this bot just tells
 // it what to play. Node details are env-driven since public nodes go up and
-// down; swap LAVALINK_HOST/PORT/PASSWORD/SECURE in Katabump's env vars to
-// switch nodes without touching code. Defaults point at a known public node
-// (lavalink.jirayu.net) as a starting point — see the list at
-// https://lavalink.darrennathanael.com/ for others if this one is down.
+// down; swap LAVALINK_HOST/PORT/PASSWORD/SECURE (and the *2 variants below)
+// in Render's env vars to switch nodes without touching code.
+//
+// Two nodes are configured, not one. Free public nodes don't just go fully
+// offline — they also intermittently return broken/HTML responses to
+// search requests while staying connected (this is what was happening with
+// lavalink.jirayu.net, then again with lavalinkv4.serenetia.com). A single
+// node means every one of those blips is a broken /play. With two nodes,
+// music.js (searchWithFailover) automatically retries a failed search on
+// the other node — see the list at https://lavalink.darrennathanael.com/
+// for more options if both of these are down at once.
 client.lavalink = new LavalinkManager({
     nodes: [
         {
-            id: process.env.LAVALINK_NODE_ID || 'public-node',
-            host: process.env.LAVALINK_HOST || 'lavalink.jirayu.net',
+            id: process.env.LAVALINK_NODE_ID || 'node-1',
+            host: process.env.LAVALINK_HOST || 'lavalinkv4.serenetia.com',
             port: Number(process.env.LAVALINK_PORT) || 443,
-            authorization: process.env.LAVALINK_PASSWORD || 'youshallnotpass',
+            authorization: process.env.LAVALINK_PASSWORD || 'https://dsc.gg/ajidevserver',
             secure: process.env.LAVALINK_SECURE !== 'false'
+        },
+        {
+            id: process.env.LAVALINK_NODE_ID2 || 'node-2',
+            host: process.env.LAVALINK_HOST2 || 'lavalink.serenetia.com',
+            port: Number(process.env.LAVALINK_PORT2) || 443,
+            authorization: process.env.LAVALINK_PASSWORD2 || 'https://dsc.gg/ajidevserver',
+            secure: process.env.LAVALINK_SECURE2 !== 'false'
         }
     ],
     sendToShard: (guildId, payload) => {

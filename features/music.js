@@ -12,6 +12,35 @@ function isSoundcloudUrl(query) {
     return /^https?:\/\/(www\.|m\.)?(soundcloud\.com|snd\.sc)\//i.test(query.trim());
 }
 
+/**
+ * Free public Lavalink nodes fail in two ways: fully disconnected (which
+ * lavalink-client already detects and reconnects on its own), and — more
+ * annoyingly — connected but returning broken/HTML responses to a specific
+ * search request while a shared node is overloaded. That second kind isn't
+ * something reconnect logic catches, since the node never actually drops.
+ * So: if a search throws, try moving the player to the other configured
+ * node (player.moveNode(), see index.js for the node list) and search once
+ * more before giving up. If there's no other connected node, this just
+ * rethrows the original error.
+ */
+async function searchWithFailover(player, searchOpts, requestUser) {
+
+    try {
+        return await player.search(searchOpts, requestUser);
+    } catch (firstErr) {
+
+        try {
+            await player.moveNode();
+        } catch {
+            throw firstErr;
+        }
+
+        return await player.search(searchOpts, requestUser);
+
+    }
+
+}
+
 function canRequestMusic(member) {
 
     const roleNames = member.roles.cache.map(r => r.name);
@@ -150,7 +179,7 @@ async function enqueueSingleQuery(interaction, player, query) {
     let res;
 
     try {
-        res = await player.search({
+        res = await searchWithFailover(player, {
             query,
             source: isSoundcloudUrl(query) ? "soundcloud" : undefined
         }, interaction.user);
@@ -221,7 +250,7 @@ async function enqueueSpotify(interaction, player, query) {
 
         let res;
         try {
-            res = await player.search({ query: spotify.trackToQuery(spotifyTrack) }, interaction.user);
+            res = await searchWithFailover(player, { query: spotify.trackToQuery(spotifyTrack) }, interaction.user);
         } catch {
             continue;
         }

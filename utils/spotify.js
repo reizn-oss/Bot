@@ -135,7 +135,11 @@ async function getAnonymousToken() {
 
 }
 
-async function spotifyGet(path) {
+// The anonymous token above is shared by every bot/site using this same
+// workaround worldwide, so 429 (rate limited) responses are common and
+// expected — not a sign anything is broken. Retry a couple of times with
+// backoff (respecting Retry-After when Spotify sends one) before giving up.
+async function spotifyGet(path, attempt = 0) {
 
     const token = await getAnonymousToken();
 
@@ -148,8 +152,20 @@ async function spotifyGet(path) {
 
     if (res.status === 404) return null;
 
+    if (res.status === 429 && attempt < 3) {
+        const retryAfterHeader = Number(res.headers.get("retry-after"));
+        const waitMs = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
+            ? retryAfterHeader * 1000
+            : 1000 * Math.pow(2, attempt); // 1s, 2s, 4s
+        await new Promise(r => setTimeout(r, waitMs));
+        return spotifyGet(path, attempt + 1);
+    }
+
     if (!res.ok) {
-        throw new Error(`Spotify API error (${res.status}) on ${path}`);
+        const rateLimitNote = res.status === 429
+            ? " Spotify is rate-limiting the free lookup method right now — try again in a moment."
+            : "";
+        throw new Error(`Spotify API error (${res.status}) on ${path}.${rateLimitNote}`);
     }
 
     return res.json();
