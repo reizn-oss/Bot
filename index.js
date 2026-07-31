@@ -84,7 +84,15 @@ client.lavalink = new LavalinkManager({
     },
     autoSkip: true,
     playerOptions: {
-        defaultSearchPlatform: 'ytsearch',
+        // YouTube search (ytsearch) is the historical default, but YouTube
+        // has been aggressively blocking/rate-limiting requests from cloud
+        // hosting IPs (Render, most VPS providers), which is why /play was
+        // failing even with a connected node. SoundCloud search (scsearch)
+        // doesn't have that problem, so it's the new default — override
+        // with MUSIC_SEARCH_PLATFORM in your env if you want ytsearch,
+        // ytmsearch, etc. back (only works if your Lavalink node has that
+        // source enabled).
+        defaultSearchPlatform: process.env.MUSIC_SEARCH_PLATFORM || 'scsearch',
         onDisconnect: { autoReconnect: true, destroyPlayer: false },
         onEmptyQueue: { destroyAfterMs: 30_000 }
     }
