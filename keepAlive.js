@@ -11,29 +11,28 @@ module.exports = function startKeepAliveServer() {
 
     const port = process.env.PORT || 3000;
 
-    // TEMPORARY — diagnosing why /play fails on free Lavalink nodes even
-    // while lavalink-client logs "connected". This hits each configured
-    // node's /v4/info directly and reports back the raw response, so we
-    // can tell a Cloudflare/proxy block (HTML response) apart from an
-    // actual node problem (JSON response, even an error one) — without
-    // needing shell/SSH access, which Render's free plan doesn't include.
-    // Safe to delete this whole block once music is confirmed working
-    // again; it doesn't expose your Lavalink passwords to the caller.
+    // Hits your Lavalink node's /v4/info and /v4/loadtracks directly and
+    // reports back the raw response — useful for telling a proxy/Cloudflare
+    // block (HTML response) apart from an actual node problem (JSON
+    // response, even an error one) without needing shell/SSH access. Visit
+    // /debug/lavalink on this service's URL. Doesn't expose your Lavalink
+    // password to the caller.
     const nodesToCheck = [
         {
-            label: "node-1",
-            host: process.env.LAVALINK_HOST || "lavalinkv4.serenetia.com",
+            label: process.env.LAVALINK_NODE_ID || "node-1",
+            host: process.env.LAVALINK_HOST,
             port: Number(process.env.LAVALINK_PORT) || 443,
-            authorization: process.env.LAVALINK_PASSWORD || "https://dsc.gg/ajidevserver",
+            authorization: process.env.LAVALINK_PASSWORD,
             secure: process.env.LAVALINK_SECURE !== "false"
         },
-        {
-            label: "node-2",
-            host: process.env.LAVALINK_HOST2 || "lavalink.serenetia.com",
+        // Only checked if a second node is actually configured.
+        ...(process.env.LAVALINK_HOST2 ? [{
+            label: process.env.LAVALINK_NODE_ID2 || "node-2",
+            host: process.env.LAVALINK_HOST2,
             port: Number(process.env.LAVALINK_PORT2) || 443,
-            authorization: process.env.LAVALINK_PASSWORD2 || "https://dsc.gg/ajidevserver",
+            authorization: process.env.LAVALINK_PASSWORD2,
             secure: process.env.LAVALINK_SECURE2 !== "false"
-        }
+        }] : [])
     ];
 
     async function checkNode(node) {

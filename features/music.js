@@ -1,12 +1,21 @@
 const { EmbedBuilder } = require("discord.js");
 
 const config = require("../config/serverConfig");
-const spotify = require("../utils/spotify");
+const { isSpotifyLink, isAppleMusicLink } = require("../utils/spotify");
 
 // With Lavalink, the actual audio fetching/decoding/sending happens on the
 // Lavalink node, not in this process — this file just tells the node what
 // to play and reacts to its events. No @discordjs/voice connection code,
 // no local streams, no ffmpeg needed here anymore.
+//
+// Spotify/Apple Music links used to be resolved here in the bot process —
+// fetching track names via a scraped Spotify Web API workaround, then
+// running each one through a separate YouTube/SoundCloud search. That's
+// gone now: the self-hosted Lavalink node (see /lavalink-server) runs the
+// LavaSrc plugin, which resolves Spotify/Apple Music links natively —
+// player.search() below just works for those URLs directly, the same way
+// it already did for plain queries and SoundCloud links, so there's no
+// separate code path needed for them anymore.
 
 function isSoundcloudUrl(query) {
     return /^https?:\/\/(www\.|m\.)?(soundcloud\.com|snd\.sc)\//i.test(query.trim());
@@ -186,10 +195,6 @@ async function enqueue(interaction, query) {
 
     const player = await getOrCreatePlayer(interaction, voiceChannel);
 
-    if (spotify.isSpotifyLink(query)) {
-        return enqueueSpotify(interaction, player, query);
-    }
-
     return enqueueSingleQuery(interaction, player, query);
 
 }
@@ -201,7 +206,7 @@ function describeMusicLookupError(err) {
     // always a wrong/rotated node password or the node's proxy erroring
     // out, not anything wrong with the query itself.
     if (/unexpected token/i.test(err.message) && /json/i.test(err.message)) {
-        return "the music backend node(s) sent back an invalid response (likely a stale node password or the node itself is down) — see index.js/.env for how to swap in fresh nodes from https://lavalink.darrennathanael.com/.";
+        return "the music backend node sent back an invalid response (likely LAVALINK_PASSWORD not matching between the bot and lavalink-server, or the node still starting up) — check the lavalink-server Render service's logs, or hit its /debug/lavalink endpoint via keepAlive.js.";
     }
 
     return err.message;
@@ -222,7 +227,18 @@ async function enqueueSingleQuery(interaction, player, query) {
     }
 
     if (!res || res.loadType === "error" || res.loadType === "empty" || !res.tracks?.length) {
-        return interaction.editReply("❌ No results found.");
+        const hint = (isSpotifyLink(query) || isAppleMusicLink(query))
+            ? " (if this is a Spotify/Apple Music link, double check the self-hosted Lavalink node has SPOTIFY_CLIENT_ID/SPOTIFY_CLIENT_SECRET configured — see lavalink-server/README.md)"
+            : "";
+        return interaction.editReply(`❌ No results found.${hint}`);
+    }
+
+    // loadType "playlist" covers Spotify albums/playlists, Apple Music
+    // playlists/albums, and SoundCloud sets — LavaSrc/Lavalink hand back
+    // every track in one response, resolved server-side. Anything else
+    // ("track"/"search") is a single result.
+    if (res.loadType === "playlist") {
+        return enqueuePlaylistResult(interaction, player, res);
     }
 
     const track = res.tracks[0];
@@ -243,74 +259,38 @@ async function enqueueSingleQuery(interaction, player, query) {
 }
 
 /**
- * Spotify's API only ever gives back metadata (track/artist names) — it
- * doesn't let anyone stream its actual audio outside Spotify's own apps.
- * So for a playlist/album/track link, we resolve the track names via the
- * Spotify Web API, then run each one through the same YouTube search
- * Lavalink already uses for a plain /play query, and queue whatever
- * matches. Sequential on purpose: this hits a shared free Lavalink node,
- * and firing 25+ searches at once would be a bad neighbor to it.
+ * Handles Spotify albums/playlists, Apple Music playlists/albums, and
+ * SoundCloud sets in one place — LavaSrc/Lavalink already resolved every
+ * track server-side by the time this runs, so there's no per-track
+ * network round trip needed here anymore (that used to be a sequential
+ * loop of Spotify Web API + YouTube search calls in this file).
  */
-async function enqueueSpotify(interaction, player, query) {
+async function enqueuePlaylistResult(interaction, player, res) {
 
-    let resolved;
-
-    try {
-        const cap = Math.max(1, config.music.maxSpotifyPlaylistTracks ?? 25);
-        resolved = await spotify.resolveSpotifyLink(query, cap);
-    } catch (err) {
-        return interaction.editReply(`❌ ${err.message}`);
-    }
-
-    if (!resolved || !resolved.tracks.length) {
-        return interaction.editReply("❌ Couldn't find any tracks in that Spotify link.");
-    }
-
+    const cap = Math.max(1, config.music.maxSpotifyPlaylistTracks ?? 25);
     const spaceLeft = config.music.maxQueueSize
         ? Math.max(0, config.music.maxQueueSize - player.queue.tracks.length)
-        : resolved.tracks.length;
+        : cap;
 
     if (spaceLeft === 0) {
         return interaction.editReply("❌ The queue is full — try again once it's shorter.");
     }
 
-    const toQueue = resolved.tracks.slice(0, spaceLeft);
+    const toQueue = res.tracks.slice(0, Math.min(cap, spaceLeft));
     const wasIdle = !player.playing && !player.paused;
 
-    let queued = 0;
-    let firstTrackTitle = null;
-
-    for (const spotifyTrack of toQueue) {
-
-        let res;
-        try {
-            res = await searchWithFailover(player, { query: spotify.trackToQuery(spotifyTrack) }, interaction.user);
-        } catch {
-            continue;
-        }
-
-        const track = res?.tracks?.[0];
-        if (!track) continue;
-
-        await player.queue.add(track);
-        queued++;
-        if (!firstTrackTitle) firstTrackTitle = track.info.title;
-
-    }
-
-    if (queued === 0) {
-        return interaction.editReply("❌ Found that Spotify link, but couldn't find a matching track on YouTube for any of it.");
-    }
+    await player.queue.add(toQueue);
 
     if (wasIdle) await player.play();
 
-    const skipped = toQueue.length - queued;
-    const truncatedNote = resolved.tracks.length > spaceLeft ? ` (queue only had room for ${spaceLeft})` : "";
-    const skippedNote = skipped > 0 ? ` (${skipped} skipped — no YouTube match found)` : "";
+    const playlistName = res.playlist?.name ?? "that playlist/album";
+    const truncatedNote = res.tracks.length > toQueue.length
+        ? ` (queue/limit only had room for ${toQueue.length} of ${res.tracks.length})`
+        : "";
 
     const summary = wasIdle
-        ? `🎵 Playing **${firstTrackTitle}** now — queued ${queued} track${queued === 1 ? "" : "s"} from **${resolved.name}**${truncatedNote}${skippedNote}.`
-        : `➕ Queued ${queued} track${queued === 1 ? "" : "s"} from **${resolved.name}**${truncatedNote}${skippedNote}.`;
+        ? `🎵 Playing **${toQueue[0].info.title}** now — queued ${toQueue.length} track${toQueue.length === 1 ? "" : "s"} from **${playlistName}**${truncatedNote}.`
+        : `➕ Queued ${toQueue.length} track${toQueue.length === 1 ? "" : "s"} from **${playlistName}**${truncatedNote}.`;
 
     await interaction.editReply(summary);
 

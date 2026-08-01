@@ -1,0 +1,91 @@
+server:
+  port: ${SERVER_PORT:2333}
+  address: 0.0.0.0
+
+lavalink:
+  plugins:
+    # LavaSrc adds real Spotify + Apple Music support (album/playlist/track
+    # links resolved server-side, not scraped in the bot's own code). Bump
+    # the version below if topi314/LavaSrc has a newer release by the time
+    # you deploy — check https://github.com/topi314/LavaSrc/releases.
+    - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.8.3"
+      repository: "https://maven.lavalink.dev/releases"
+
+  server:
+    # Set LAVALINK_PASSWORD in Render's environment for this service —
+    # don't hardcode a real password here. This must match
+    # LAVALINK_PASSWORD in the bot service's env.
+    password: "${LAVALINK_PASSWORD}"
+    sources:
+      # Built into Lavalink itself, no plugin needed, and not subject to
+      # YouTube's IP-based blocking of cloud/datacenter hosts (Render
+      # included) — this is why it stays the primary source here, same as
+      # MUSIC_SEARCH_PLATFORM=scsearch was in the old setup.
+      soundcloud: true
+      bandcamp: true
+      twitch: true
+      vimeo: true
+      http: false
+      local: false
+      # Off on purpose. The built-in YouTube source is what was breaking
+      # on Render (IP blocking) even when a node was "connected" — that's
+      # the root cause of the 403s you were seeing. Leave this off unless
+      # you've separately set up a maintained YouTube plugin
+      # (https://github.com/lavalink-devs/youtube-source) with working
+      # PO-token/OAuth config; a half-configured YouTube source will just
+      # reintroduce the same failures.
+      youtube: false
+    bufferDurationMs: 400
+    frameBufferDurationMs: 5000
+    trackStuckThresholdMs: 10000
+    playerUpdateInterval: 5
+    filters:
+      volume: true
+      equalizer: true
+      timescale: true
+      channelMix: true
+
+# LavaSrc-specific config (top-level "plugins" key, not "lavalink.plugins"
+# above — those are two different things: one installs the plugin, this
+# one configures it).
+plugins:
+  lavasrc:
+    providers:
+      # Spotify/Apple Music can only ever give metadata (track/artist
+      # names) — actual audio has to come from somewhere else. Routing
+      # that through SoundCloud search keeps everything on the one
+      # source that reliably works from Render's IPs, instead of quietly
+      # falling back to YouTube (ytsearch) and hitting the same wall.
+      - "scsearch:%QUERY%"
+    sources:
+      spotify: true
+      applemusic: true
+      deezer: false
+      yandexmusic: false
+      flowerytts: false
+    spotify:
+      # Free, official, and sanctioned — register a normal app at
+      # https://developer.spotify.com/dashboard (takes 2 minutes, no
+      # approval wait for this use case), then set these two values as
+      # environment variables on this Render service. This replaces the
+      # old TOTP-secret-scraping approach entirely; LavaSrc's maintainers
+      # keep this working as Spotify's API changes, so it's no longer
+      # this bot's problem to fix every time Spotify tweaks something.
+      clientId: "${SPOTIFY_CLIENT_ID}"
+      clientSecret: "${SPOTIFY_CLIENT_SECRET}"
+      countryCode: "US"
+    applemusic:
+      countryCode: "US"
+
+metrics:
+  prometheus:
+    enabled: false
+
+logging:
+  level:
+    root: INFO
+    lavalink: INFO
+  logback:
+    rollingpolicy:
+      max-file-size: 50MB
+      max-history: 3

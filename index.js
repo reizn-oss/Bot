@@ -59,53 +59,49 @@ const client = new Client({
 client.commands = new Collection();
 
 // Lavalink handles the actual audio fetching/decoding — this bot just tells
-// it what to play. Node details are env-driven since public nodes go up and
-// down; swap the LAVALINK_* vars in Render's/Katabump's env vars to switch
-// nodes without touching code.
+// it what to play. Node details are env-driven so you can point this at any
+// node without touching code.
 //
-// Three nodes are configured, not one — and deliberately from three
-// *different* operators/providers, not just three different hostnames.
-// Free public Lavalink nodes fail in two ways: fully disconnected (which
-// lavalink-client already detects and reconnects on its own), and — more
-// annoyingly — connected but returning broken/HTML responses to a specific
-// search request while a shared node is overloaded, has an expired/rotated
-// password, or the proxy in front of it is erroring out (that's what an
-// "Unexpected token '<' ... is not valid JSON" error means: the node sent
-// back an HTML error page instead of a JSON response). That second kind
-// isn't something reconnect logic catches, since the node's WebSocket
-// never actually drops. Earlier versions of this file pointed both nodes
-// at serenetia.com — which turned out to be the same operator under two
-// hostnames, so one password rotation (dsc.gg/ajidevserver ->
-// seretia.link/discord, mid-2026) silently broke *both* "nodes" at once.
-// Fixed here by using three genuinely independent hosts; music.js
-// (searchWithFailover) walks through every other connected node in turn
-// on a broken search before giving up. See
-// https://lavalink.darrennathanael.com/ for more/fresher options if all
-// three of these are ever down at once — that page is updated regularly
-// and is the source of truth for current host/port/password, not this file.
+// This used to point at three free, third-party public Lavalink nodes.
+// Those fail in two ways: fully disconnected (which lavalink-client already
+// detects and reconnects on its own), and — more annoyingly — connected but
+// returning broken/HTML responses to a specific search request while a
+// shared node is overloaded, has an expired/rotated password, or the proxy
+// in front of it is erroring out (that's what the "403 Unexpected server
+// response" / "Unexpected token '<' ... is not valid JSON" errors meant).
+// That's not something reconnect logic catches, since the node's WebSocket
+// never actually drops — it just quietly stops working.
+//
+// This now points at a self-hosted node instead (see /lavalink-server in
+// this repo, deployed as a second Render service) — you control it, so
+// there's no third-party password rotation or overload to break /play out
+// from under you. It also runs the LavaSrc plugin, so Spotify/Apple Music
+// links resolve natively at the node instead of the bot scraping Spotify's
+// web player internals in JS (see utils/spotify.js).
+//
+// A second/third node can still be added below for failover if you want
+// belt-and-suspenders — music.js (searchWithFailover) will walk through
+// every other *connected* node on a broken search before giving up.
 client.lavalink = new LavalinkManager({
     nodes: [
         {
             id: process.env.LAVALINK_NODE_ID || 'node-1',
-            host: process.env.LAVALINK_HOST || 'lavalinkv4.serenetia.com',
+            host: process.env.LAVALINK_HOST,
             port: Number(process.env.LAVALINK_PORT) || 443,
-            authorization: process.env.LAVALINK_PASSWORD || 'https://seretia.link/discord',
+            authorization: process.env.LAVALINK_PASSWORD,
             secure: process.env.LAVALINK_SECURE !== 'false'
-        },
-        {
-            id: process.env.LAVALINK_NODE_ID2 || 'node-2',
-            host: process.env.LAVALINK_HOST2 || 'lava-v4.millohost.my.id',
-            port: Number(process.env.LAVALINK_PORT2) || 443,
-            authorization: process.env.LAVALINK_PASSWORD2 || 'https://discord.gg/mjS5J2K3ep',
-            secure: process.env.LAVALINK_SECURE2 !== 'false'
-        },
-        {
-            id: process.env.LAVALINK_NODE_ID3 || 'node-3',
-            host: process.env.LAVALINK_HOST3 || 'lavalink-v4.triniumhost.com',
-            port: Number(process.env.LAVALINK_PORT3) || 443,
-            authorization: process.env.LAVALINK_PASSWORD3 || 'free',
-            secure: process.env.LAVALINK_SECURE3 !== 'false'
         }
+        // Optional second node for failover — only added if configured.
+        // Uncomment and set LAVALINK_HOST2/PORT2/PASSWORD2/SECURE2 in .env
+        // if you stand up a backup node (your own second instance, or a
+        // fresh node from https://lavalink.darrennathanael.com/).
+        // {
+        //     id: process.env.LAVALINK_NODE_ID2 || 'node-2',
+        //     host: process.env.LAVALINK_HOST2,
+        //     port: Number(process.env.LAVALINK_PORT2) || 443,
+        //     authorization: process.env.LAVALINK_PASSWORD2,
+        //     secure: process.env.LAVALINK_SECURE2 !== 'false'
+        // }
     ],
     sendToShard: (guildId, payload) => {
         const guild = client.guilds.cache.get(guildId);
@@ -117,14 +113,13 @@ client.lavalink = new LavalinkManager({
     },
     autoSkip: true,
     playerOptions: {
-        // YouTube search (ytsearch) is the historical default, but YouTube
-        // has been aggressively blocking/rate-limiting requests from cloud
+        // SoundCloud search (scsearch) instead of YouTube (ytsearch) —
+        // YouTube aggressively blocks/rate-limits requests from cloud
         // hosting IPs (Render, most VPS providers), which is why /play was
-        // failing even with a connected node. SoundCloud search (scsearch)
-        // doesn't have that problem, so it's the new default — override
-        // with MUSIC_SEARCH_PLATFORM in your env if you want ytsearch,
-        // ytmsearch, etc. back (only works if your Lavalink node has that
-        // source enabled).
+        // failing even with a connected node. This is also the source
+        // LavaSrc falls back to for Spotify/Apple Music tracks (see
+        // lavalink-server/application.yml's "providers" section) so the
+        // whole pipeline avoids YouTube consistently.
         defaultSearchPlatform: process.env.MUSIC_SEARCH_PLATFORM || 'scsearch',
         onDisconnect: { autoReconnect: true, destroyPlayer: false },
         onEmptyQueue: { destroyAfterMs: 30_000 }

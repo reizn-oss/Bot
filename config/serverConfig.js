@@ -375,10 +375,10 @@ module.exports = {
         defaultVolume: 0.5,
         // Bot leaves the voice channel after this long with an empty queue
         idleTimeoutMs: 5 * 60 * 1000,
-        // /play with a Spotify playlist/album link resolves track names via
-        // the Spotify Web API, then searches YouTube for each one — capped
-        // here since that's one sequential Lavalink search per track (raise
-        // with care on a shared free node; also bounded by maxQueueSize).
+        // /play with a Spotify/Apple Music playlist/album link (or a
+        // SoundCloud set) gets every track back in one Lavalink response
+        // (resolved server-side by the LavaSrc plugin) — this just caps how
+        // many of those get queued at once, also bounded by maxQueueSize.
         maxSpotifyPlaylistTracks: 25
     }
 
