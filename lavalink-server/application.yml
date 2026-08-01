@@ -1,0 +1,134 @@
+server:
+  port: ${SERVER_PORT:2333}
+  address: 0.0.0.0
+
+lavalink:
+  plugins:
+    # LavaSrc adds real Spotify + Apple Music support (album/playlist/track
+    # links resolved server-side, not scraped in the bot's own code). Bump
+    # the version below if topi314/LavaSrc has a newer release by the time
+    # you deploy — check https://github.com/topi314/LavaSrc/releases.
+    - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.8.3"
+      repository: "https://maven.lavalink.dev/releases"
+    # youtube-source: the maintained replacement for Lavalink's deprecated
+    # built-in YouTube support, added because the built-in SoundCloud
+    # engine (still enabled below) turned out to be the one actually
+    # unreliable from this Render instance — every track's audio stream
+    # was 404ing, not just search/metadata. This gives a second, actually
+    # working source instead of only depending on SoundCloud. Bump the
+    # version if there's a newer release — check
+    # https://github.com/lavalink-devs/youtube-source/releases.
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.1"
+      repository: "https://maven.lavalink.dev/releases"
+
+  server:
+    # Set LAVALINK_PASSWORD in Render's environment for this service —
+    # don't hardcode a real password here. This must match
+    # LAVALINK_PASSWORD in the bot service's env.
+    password: "${LAVALINK_PASSWORD}"
+    sources:
+      # Kept on — SoundCloud *search/metadata* still works fine, it's only
+      # the actual audio stream delivery that's been failing (every track
+      # 404ing as of testing on Aug 1 2026). Leaving this enabled costs
+      # nothing; if SoundCloud's stream delivery recovers on its own later,
+      # it's still available as a fallback via MUSIC_SEARCH_PLATFORM.
+      soundcloud: true
+      bandcamp: true
+      twitch: true
+      vimeo: true
+      http: false
+      local: false
+      # The *built-in* YouTube source stays off — it's deprecated and
+      # unmaintained. YouTube is enabled below instead, via the actively
+      # maintained youtube-source plugin (see lavalink.plugins above and
+      # plugins.youtube below), which is what actually handles requests.
+      youtube: false
+    bufferDurationMs: 400
+    frameBufferDurationMs: 5000
+    trackStuckThresholdMs: 10000
+    playerUpdateInterval: 5
+    filters:
+      volume: true
+      equalizer: true
+      timescale: true
+      channelMix: true
+
+# Config for the plugins installed above (this is a different top-level
+# key than "lavalink.plugins" further up — that one installs plugin jars,
+# this one configures them). No YouTube login/OAuth required for this
+# baseline setup — it rotates through several of YouTube's internal
+# client types so that if one gets challenged/blocked, another can still
+# serve the request. Not bulletproof (YouTube's blocking evolves
+# constantly, same as it did for the old free nodes), but meaningfully
+# more resilient than relying on a single client type.
+plugins:
+  youtube:
+    enabled: true
+    allowSearch: true
+    allowDirectVideoIds: true
+    allowDirectPlaylistIds: true
+    clients:
+      - MUSIC
+      - WEB
+      - ANDROID_VR
+      - TVHTML5_SIMPLY
+    oauth:
+      # This is the actual, sanctioned fix for "This video requires
+      # login" / "Sign in to confirm you're not a bot" — every
+      # unauthenticated client type got that wall in testing on this
+      # Render instance (Aug 1 2026 logs), which is YouTube's normal
+      # anti-bot check, not a misconfiguration. OAuth device-code login
+      # (the same mechanism as signing a TV/game console into an app) is
+      # how the plugin is designed to get past it — see
+      # lavalink-server/README.md for the one-time setup steps.
+      enabled: true
+      # Flipped to true: YOUTUBE_REFRESH_TOKEN is already set on this
+      # service's environment (confirmed Aug 2 2026), so the plugin
+      # should trust it and skip re-running the device-code flow on
+      # every boot. With this left at false, the stored refresh token
+      # was never actually being used — that was the real cause of
+      # YouTube still failing after OAuth setup. If YOUTUBE_REFRESH_TOKEN
+      # ever gets revoked/invalidated, flip this back to false and empty
+      # the token to redo the one-time device flow (see README.md).
+      skipInitialization: true
+      refreshToken: "${YOUTUBE_REFRESH_TOKEN:}"
+  lavasrc:
+    providers:
+      # Reordered: SoundCloud actually succeeded in testing (Aug 1 2026
+      # logs) while every YouTube client hit the bot-detection wall
+      # above — so SoundCloud goes first until YouTube OAuth is set up,
+      # then either order is fine once that wall is gone.
+      - "scsearch:%QUERY%"
+      - "ytsearch:%QUERY%"
+    sources:
+      spotify: true
+      applemusic: true
+      deezer: false
+      yandexmusic: false
+      flowerytts: false
+    spotify:
+      # Free, official, and sanctioned — register a normal app at
+      # https://developer.spotify.com/dashboard (takes 2 minutes, no
+      # approval wait for this use case), then set these two values as
+      # environment variables on this Render service. This replaces the
+      # old TOTP-secret-scraping approach entirely; LavaSrc's maintainers
+      # keep this working as Spotify's API changes, so it's no longer
+      # this bot's problem to fix every time Spotify tweaks something.
+      clientId: "${SPOTIFY_CLIENT_ID}"
+      clientSecret: "${SPOTIFY_CLIENT_SECRET}"
+      countryCode: "US"
+    applemusic:
+      countryCode: "US"
+
+metrics:
+  prometheus:
+    enabled: false
+
+logging:
+  level:
+    root: INFO
+    lavalink: INFO
+  logback:
+    rollingpolicy:
+      max-file-size: 50MB
+      max-history: 3
