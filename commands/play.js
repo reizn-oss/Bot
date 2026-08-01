@@ -6,7 +6,7 @@ module.exports = {
 
     data: new SlashCommandBuilder()
         .setName("play")
-        .setDescription("Play or queue a song, Spotify/Apple Music album/playlist/track, or SoundCloud link (Verified only).")
+        .setDescription("Play or queue a song, Spotify/Apple Music playlist/album/track, or SoundCloud link (Verified members only).")
         .addStringOption(opt =>
             opt.setName("query").setDescription("Song name, Spotify link, Apple Music link, or SoundCloud URL").setRequired(true)),
 
