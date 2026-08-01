@@ -38,26 +38,27 @@ module.exports = function startKeepAliveServer() {
 
     async function checkNode(node) {
 
-        const url = `${node.secure ? "https" : "http"}://${node.host}:${node.port}/v4/info`;
+        const infoUrl = `${node.secure ? "https" : "http"}://${node.host}:${node.port}/v4/info`;
+        const searchUrl = `${node.secure ? "https" : "http"}://${node.host}:${node.port}/v4/loadtracks?identifier=scsearch:test`;
 
-        try {
-
-            const res = await fetch(url, { headers: { Authorization: node.authorization } });
-            const bodyText = await res.text();
-            const looksLikeHtml = /^\s*</.test(bodyText);
-
-            return {
-                label: node.label,
-                url,
-                status: res.status,
-                contentType: res.headers.get("content-type"),
-                looksLikeHtml,
-                bodyPreview: bodyText.slice(0, 300)
-            };
-
-        } catch (err) {
-            return { label: node.label, url, error: err.message };
+        async function probe(url) {
+            try {
+                const res = await fetch(url, { headers: { Authorization: node.authorization } });
+                const bodyText = await res.text();
+                return {
+                    status: res.status,
+                    contentType: res.headers.get("content-type"),
+                    looksLikeHtml: /^\s*</.test(bodyText),
+                    bodyPreview: bodyText.slice(0, 300)
+                };
+            } catch (err) {
+                return { error: err.message };
+            }
         }
+
+        const [info, search] = await Promise.all([probe(infoUrl), probe(searchUrl)]);
+
+        return { label: node.label, info: { url: infoUrl, ...info }, search: { url: searchUrl, ...search } };
 
     }
 
