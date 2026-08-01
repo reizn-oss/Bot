@@ -52,3 +52,12 @@ Check Spotify albums/tracks and a plain search first (SoundCloud is the
 default search platform). Once you see `Lavalink is ready to accept
 connections.` in the Lavalink service logs and no OAuth errors, try
 YouTube.
+
+## 7. Spotify playlists now work too (embed-page scraping)
+Track and album links already worked natively. Playlists now resolve via
+`utils/spotifyPlaylistScraper.js`, which reads Spotify's public embed page
+instead of the official API (which requires a logged-in user for playlist
+contents as of Feb 2026). No new env vars or account needed for this.
+
+Trade-off: it's an unofficial page, so it can break if Spotify changes its
+structure — see `PLAYLIST_SCRAPE_TROUBLESHOOTING.md` if that happens.

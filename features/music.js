@@ -1,7 +1,8 @@
 const { EmbedBuilder } = require("discord.js");
 
 const config = require("../config/serverConfig");
-const { isSpotifyLink, isAppleMusicLink } = require("../utils/spotify");
+const { isSpotifyLink, isSpotifyPlaylistLink, extractSpotifyPlaylistId, isAppleMusicLink } = require("../utils/spotify");
+const { fetchPlaylistTracks } = require("../utils/spotifyPlaylistScraper");
 
 // With Lavalink, the actual audio fetching/decoding/sending happens on the
 // Lavalink node, not in this process — this file just tells the node what
@@ -195,6 +196,15 @@ async function enqueue(interaction, query) {
 
     const player = await getOrCreatePlayer(interaction, voiceChannel);
 
+    // Spotify playlists specifically can't be resolved by LavaSrc's
+    // clientId/clientSecret auth (Spotify requires a logged-in user for
+    // playlist contents) — see utils/spotifyPlaylistScraper.js. Tracks
+    // and albums don't have this problem and keep using the normal path
+    // below, resolved natively by the Lavalink node.
+    if (isSpotifyPlaylistLink(query)) {
+        return enqueueScrapedSpotifyPlaylist(interaction, player, query);
+    }
+
     return enqueueSingleQuery(interaction, player, query);
 
 }
@@ -227,7 +237,9 @@ async function enqueueSingleQuery(interaction, player, query) {
     }
 
     if (!res || res.loadType === "error" || res.loadType === "empty" || !res.tracks?.length) {
-        const hint = (isSpotifyLink(query) || isAppleMusicLink(query))
+        // Playlist links never reach this function (see enqueue() above),
+        // so this hint only needs to cover tracks/albums now.
+        const hint = ((isSpotifyLink(query) && !isSpotifyPlaylistLink(query)) || isAppleMusicLink(query))
             ? " (if this is a Spotify/Apple Music link, double check the self-hosted Lavalink node has SPOTIFY_CLIENT_ID/SPOTIFY_CLIENT_SECRET configured — see lavalink-server/README.md)"
             : "";
         return interaction.editReply(`❌ No results found.${hint}`);
@@ -291,6 +303,95 @@ async function enqueuePlaylistResult(interaction, player, res) {
     const summary = wasIdle
         ? `🎵 Playing **${toQueue[0].info.title}** now — queued ${toQueue.length} track${toQueue.length === 1 ? "" : "s"} from **${playlistName}**${truncatedNote}.`
         : `➕ Queued ${toQueue.length} track${toQueue.length === 1 ? "" : "s"} from **${playlistName}**${truncatedNote}.`;
+
+    await interaction.editReply(summary);
+
+}
+
+/**
+ * Spotify playlists only, via utils/spotifyPlaylistScraper.js — reads the
+ * track list off Spotify's public embed page (no login/API creds needed),
+ * then resolves each title+artist through the normal search backend
+ * (SoundCloud/YouTube, same as everything else) one at a time. Sequential
+ * on purpose: a burst of parallel searches is more likely to get
+ * rate-limited by the search backend than a steady stream, and this only
+ * runs once per playlist request, not per track added normally.
+ */
+async function enqueueScrapedSpotifyPlaylist(interaction, player, query) {
+
+    const playlistId = extractSpotifyPlaylistId(query);
+
+    if (!playlistId) {
+        return interaction.editReply("❌ Couldn't read that as a Spotify playlist link.");
+    }
+
+    let playlist;
+
+    try {
+        playlist = await fetchPlaylistTracks(playlistId);
+    } catch (err) {
+        console.error("Spotify playlist scrape failed:", err.message);
+        return interaction.editReply(
+            `❌ Couldn't read that Spotify playlist — ${err.message}. ` +
+            "Track and album links still work fine either way."
+        );
+    }
+
+    if (!playlist.tracks.length) {
+        return interaction.editReply("❌ That Spotify playlist looks empty (or Spotify didn't return any tracks for it).");
+    }
+
+    const cap = Math.max(1, config.music.maxSpotifyPlaylistTracks ?? 25);
+    const spaceLeft = config.music.maxQueueSize
+        ? Math.max(0, config.music.maxQueueSize - player.queue.tracks.length)
+        : cap;
+
+    if (spaceLeft === 0) {
+        return interaction.editReply("❌ The queue is full — try again once it's shorter.");
+    }
+
+    const toResolve = playlist.tracks.slice(0, Math.min(cap, spaceLeft));
+
+    await interaction.editReply(`🔎 Found **${playlist.tracks.length}** track${playlist.tracks.length === 1 ? "" : "s"} in **${playlist.name}** — resolving ${toResolve.length} now...`);
+
+    const resolved = [];
+    let failed = 0;
+
+    for (const track of toResolve) {
+
+        try {
+            const res = await searchWithFailover(player, { query: track.query }, interaction.user);
+            if (res && res.tracks?.length && res.loadType !== "error" && res.loadType !== "empty") {
+                resolved.push(res.tracks[0]);
+            } else {
+                failed++;
+            }
+        } catch {
+            failed++;
+        }
+
+    }
+
+    if (!resolved.length) {
+        return interaction.editReply(
+            `❌ Found **${playlist.name}** but couldn't resolve any of its ${toResolve.length} tracks to something playable.`
+        );
+    }
+
+    const wasIdle = !player.playing && !player.paused;
+
+    await player.queue.add(resolved);
+
+    if (wasIdle) await player.play();
+
+    const truncatedNote = playlist.tracks.length > toResolve.length
+        ? ` (limit only had room for ${toResolve.length} of ${playlist.tracks.length})`
+        : "";
+    const failedNote = failed ? ` — ${failed} couldn't be found and ${failed === 1 ? "was" : "were"} skipped` : "";
+
+    const summary = wasIdle
+        ? `🎵 Playing **${resolved[0].info.title}** now — queued ${resolved.length} track${resolved.length === 1 ? "" : "s"} from **${playlist.name}**${truncatedNote}${failedNote}.`
+        : `➕ Queued ${resolved.length} track${resolved.length === 1 ? "" : "s"} from **${playlist.name}**${truncatedNote}${failedNote}.`;
 
     await interaction.editReply(summary);
 
