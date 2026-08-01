@@ -115,15 +115,43 @@ async function trackViolationAndMaybeLimit(message) {
     clearViolations(recent.map(v => v.id));
 
     const member = message.member;
-    if (!member || !member.moderatable) return;
 
-    await member.timeout(timeoutMinutes * 60 * 1000, "Automatic: repeated auto-mod violations").catch(() => {});
+    if (!member || !member.moderatable) {
 
-    await logAction(message.guild, {
-        title: "⏳ Auto-Timeout (Limited)",
-        description: `${member} was automatically timed out for ${timeoutMinutes} minute(s) after ${recent.length} violations in the last ${Math.round(windowMs / 60000)} minute(s).`,
-        color: 0xED4245
-    });
+        // This is the #1 cause of "auto-timeout doesn't seem to do
+        // anything" reports: the bot's own role sits below the member's
+        // highest role (or the bot lacks Timeout Members), so Discord
+        // silently refuses the timeout. Surface it instead of failing
+        // quietly so staff can actually fix the role order.
+        await logAction(message.guild, {
+            title: "⚠️ Auto-Timeout Failed",
+            description: `${message.author} crossed the auto-mod violation threshold (${recent.length} in ${Math.round(windowMs / 60000)} minute(s)), but I couldn't time them out — check that my role is above theirs and that I have the "Timeout Members" permission.`,
+            color: 0xED4245
+        });
+
+        return;
+
+    }
+
+    try {
+
+        await member.timeout(timeoutMinutes * 60 * 1000, "Automatic: repeated auto-mod violations");
+
+        await logAction(message.guild, {
+            title: "⏳ Auto-Timeout (Limited)",
+            description: `${member} was automatically timed out for ${timeoutMinutes} minute(s) after ${recent.length} violations in the last ${Math.round(windowMs / 60000)} minute(s). This expires on its own — Discord handles the countdown server-side, not the bot, so it lifts on schedule even through restarts/redeploys.`,
+            color: 0xED4245
+        });
+
+    } catch (err) {
+
+        await logAction(message.guild, {
+            title: "⚠️ Auto-Timeout Failed",
+            description: `${member} crossed the auto-mod violation threshold, but the timeout request itself errored: ${err.message}`,
+            color: 0xED4245
+        });
+
+    }
 
 }
 

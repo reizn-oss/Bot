@@ -89,21 +89,16 @@ async function fetchServerTimeSeconds() {
 
 }
 
-async function getAnonymousToken() {
-
-    if (cachedToken && Date.now() < cachedTokenExpiresAt) {
-        return cachedToken;
-    }
-
-    const secrets = await getSecretDict();
-    const version = Math.max(...Object.keys(secrets).map(Number));
-    const cipherBytes = secrets[String(version)];
-
-    const [serverTime] = await Promise.all([fetchServerTimeSeconds()]);
-    const totp = generateTotp(totpSecretBytes(cipherBytes), serverTime);
+// Actually hits the token endpoint for a given "reason" value. Spotify's
+// own web player first requests a token with reason=transport, and falls
+// back to reason=init if that one doesn't pan out — some datacenter/cloud
+// hosting IPs (Katabump included) get a transport token that 200s but
+// doesn't actually work, while init succeeds. See getAnonymousToken()
+// below for the fallback logic that mirrors this.
+async function requestAnonymousToken(totp, version, reason) {
 
     const params = new URLSearchParams({
-        reason: "transport",
+        reason,
         productType: "web-player",
         totp,
         totpServer: totp,
@@ -120,12 +115,45 @@ async function getAnonymousToken() {
     });
 
     if (!res.ok) {
-        throw new Error(`Couldn't get a Spotify access token (${res.status}). Spotify may have changed how anonymous tokens work again — see utils/spotify.js for the current workaround, or request Extended Quota Mode for the app.`);
+        const err = new Error(`Spotify token request (reason=${reason}) failed (${res.status}).`);
+        err.status = res.status;
+        throw err;
     }
 
     const data = await res.json();
     if (!data.accessToken) {
-        throw new Error("Spotify didn't return an access token.");
+        throw new Error(`Spotify didn't return an access token (reason=${reason}).`);
+    }
+
+    return data;
+
+}
+
+async function getAnonymousToken() {
+
+    if (cachedToken && Date.now() < cachedTokenExpiresAt) {
+        return cachedToken;
+    }
+
+    const secrets = await getSecretDict();
+    const version = Math.max(...Object.keys(secrets).map(Number));
+    const cipherBytes = secrets[String(version)];
+
+    const serverTime = await fetchServerTimeSeconds();
+    const totp = generateTotp(totpSecretBytes(cipherBytes), serverTime);
+
+    let data;
+
+    try {
+        data = await requestAnonymousToken(totp, version, "transport");
+    } catch (transportErr) {
+
+        try {
+            data = await requestAnonymousToken(totp, version, "init");
+        } catch (initErr) {
+            throw new Error(`Couldn't get a Spotify access token (${initErr.status ?? "network error"}). Spotify may have changed how anonymous tokens work again — see utils/spotify.js for the current workaround, or request Extended Quota Mode for the app.`);
+        }
+
     }
 
     cachedToken = data.accessToken;
