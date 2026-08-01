@@ -60,32 +60,51 @@ client.commands = new Collection();
 
 // Lavalink handles the actual audio fetching/decoding — this bot just tells
 // it what to play. Node details are env-driven since public nodes go up and
-// down; swap LAVALINK_HOST/PORT/PASSWORD/SECURE (and the *2 variants below)
-// in Render's env vars to switch nodes without touching code.
+// down; swap the LAVALINK_* vars in Render's/Katabump's env vars to switch
+// nodes without touching code.
 //
-// Two nodes are configured, not one. Free public nodes don't just go fully
-// offline — they also intermittently return broken/HTML responses to
-// search requests while staying connected (this is what was happening with
-// lavalink.jirayu.net, then again with lavalinkv4.serenetia.com). A single
-// node means every one of those blips is a broken /play. With two nodes,
-// music.js (searchWithFailover) automatically retries a failed search on
-// the other node — see the list at https://lavalink.darrennathanael.com/
-// for more options if both of these are down at once.
+// Three nodes are configured, not one — and deliberately from three
+// *different* operators/providers, not just three different hostnames.
+// Free public Lavalink nodes fail in two ways: fully disconnected (which
+// lavalink-client already detects and reconnects on its own), and — more
+// annoyingly — connected but returning broken/HTML responses to a specific
+// search request while a shared node is overloaded, has an expired/rotated
+// password, or the proxy in front of it is erroring out (that's what an
+// "Unexpected token '<' ... is not valid JSON" error means: the node sent
+// back an HTML error page instead of a JSON response). That second kind
+// isn't something reconnect logic catches, since the node's WebSocket
+// never actually drops. Earlier versions of this file pointed both nodes
+// at serenetia.com — which turned out to be the same operator under two
+// hostnames, so one password rotation (dsc.gg/ajidevserver ->
+// seretia.link/discord, mid-2026) silently broke *both* "nodes" at once.
+// Fixed here by using three genuinely independent hosts; music.js
+// (searchWithFailover) walks through every other connected node in turn
+// on a broken search before giving up. See
+// https://lavalink.darrennathanael.com/ for more/fresher options if all
+// three of these are ever down at once — that page is updated regularly
+// and is the source of truth for current host/port/password, not this file.
 client.lavalink = new LavalinkManager({
     nodes: [
         {
             id: process.env.LAVALINK_NODE_ID || 'node-1',
             host: process.env.LAVALINK_HOST || 'lavalinkv4.serenetia.com',
             port: Number(process.env.LAVALINK_PORT) || 443,
-            authorization: process.env.LAVALINK_PASSWORD || 'https://dsc.gg/ajidevserver',
+            authorization: process.env.LAVALINK_PASSWORD || 'https://seretia.link/discord',
             secure: process.env.LAVALINK_SECURE !== 'false'
         },
         {
             id: process.env.LAVALINK_NODE_ID2 || 'node-2',
-            host: process.env.LAVALINK_HOST2 || 'lavalink.serenetia.com',
+            host: process.env.LAVALINK_HOST2 || 'lava-v4.millohost.my.id',
             port: Number(process.env.LAVALINK_PORT2) || 443,
-            authorization: process.env.LAVALINK_PASSWORD2 || 'https://dsc.gg/ajidevserver',
+            authorization: process.env.LAVALINK_PASSWORD2 || 'https://discord.gg/mjS5J2K3ep',
             secure: process.env.LAVALINK_SECURE2 !== 'false'
+        },
+        {
+            id: process.env.LAVALINK_NODE_ID3 || 'node-3',
+            host: process.env.LAVALINK_HOST3 || 'lavalink-v4.triniumhost.com',
+            port: Number(process.env.LAVALINK_PORT3) || 443,
+            authorization: process.env.LAVALINK_PASSWORD3 || 'free',
+            secure: process.env.LAVALINK_SECURE3 !== 'false'
         }
     ],
     sendToShard: (guildId, payload) => {

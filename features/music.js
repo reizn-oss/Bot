@@ -16,12 +16,13 @@ function isSoundcloudUrl(query) {
  * Free public Lavalink nodes fail in two ways: fully disconnected (which
  * lavalink-client already detects and reconnects on its own), and — more
  * annoyingly — connected but returning broken/HTML responses to a specific
- * search request while a shared node is overloaded. That second kind isn't
- * something reconnect logic catches, since the node never actually drops.
- * So: if a search throws, try moving the player to the other configured
- * node (player.moveNode(), see index.js for the node list) and search once
- * more before giving up. If there's no other connected node, this just
- * rethrows the original error.
+ * search request while a node is overloaded, mid-restart, or sitting
+ * behind a proxy that's erroring out (rotated/wrong password, etc.). That
+ * second kind isn't something reconnect logic catches, since the node
+ * never actually drops its WebSocket. So: if a search throws, walk through
+ * every *other* currently-connected node (player.moveNode(id)) and retry
+ * the search on each one in turn before giving up — not just a single
+ * alternate. See index.js for the configured node list.
  */
 async function searchWithFailover(player, searchOpts, requestUser) {
 
@@ -29,13 +30,32 @@ async function searchWithFailover(player, searchOpts, requestUser) {
         return await player.search(searchOpts, requestUser);
     } catch (firstErr) {
 
-        try {
-            await player.moveNode();
-        } catch {
-            throw firstErr;
+        const client = player.LavalinkManager;
+        const originalNodeId = player.node?.id;
+
+        const otherNodeIds = Array.from(client.nodeManager.nodes.values())
+            .filter(node => node.connected && node.id !== originalNodeId)
+            .map(node => node.id);
+
+        let lastErr = firstErr;
+
+        for (const nodeId of otherNodeIds) {
+
+            try {
+                await player.moveNode(nodeId);
+            } catch {
+                continue; // that node disappeared/rejected the move — try the next one
+            }
+
+            try {
+                return await player.search(searchOpts, requestUser);
+            } catch (err) {
+                lastErr = err;
+            }
+
         }
 
-        return await player.search(searchOpts, requestUser);
+        throw lastErr;
 
     }
 
@@ -174,6 +194,20 @@ async function enqueue(interaction, query) {
 
 }
 
+function describeMusicLookupError(err) {
+
+    // A raw "Unexpected token '<' ... is not valid JSON" means a Lavalink
+    // node sent back an HTML page instead of a JSON response — almost
+    // always a wrong/rotated node password or the node's proxy erroring
+    // out, not anything wrong with the query itself.
+    if (/unexpected token/i.test(err.message) && /json/i.test(err.message)) {
+        return "the music backend node(s) sent back an invalid response (likely a stale node password or the node itself is down) — see index.js/.env for how to swap in fresh nodes from https://lavalink.darrennathanael.com/.";
+    }
+
+    return err.message;
+
+}
+
 async function enqueueSingleQuery(interaction, player, query) {
 
     let res;
@@ -184,7 +218,7 @@ async function enqueueSingleQuery(interaction, player, query) {
             source: isSoundcloudUrl(query) ? "soundcloud" : undefined
         }, interaction.user);
     } catch (err) {
-        return interaction.editReply(`❌ Couldn't look that up: ${err.message}`);
+        return interaction.editReply(`❌ Couldn't look that up: ${describeMusicLookupError(err)}`);
     }
 
     if (!res || res.loadType === "error" || res.loadType === "empty" || !res.tracks?.length) {
