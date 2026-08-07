@@ -134,8 +134,20 @@ module.exports = {
                 // Hidden from everyone except staff until the matching
                 // interest role is picked from the 🎨 Interest Roles panel
                 // in #role-select — same gateRole pattern as 🎮 GAMING.
-                { name: "🖼-project-showcase", gateRole: "Innovator" },
-                { name: "🎨-art-showcase", gateRole: "Artist" },
+                // Both showcases are Forum channels (New Post + tags),
+                // not regular text channels — see `forum`/`tags` below.
+                {
+                    name: "🖼-project-showcase",
+                    gateRole: "Innovator",
+                    forum: true,
+                    tags: ["Personal Project", "School Project", "Web Development", "Mobile Development", "Open for Feedback"]
+                },
+                {
+                    name: "🎨-art-showcase",
+                    gateRole: "Artist",
+                    forum: true,
+                    tags: ["Personal Project", "School Project", "Digital Art", "Traditional Art", "Open for Feedback"]
+                },
                 "🤖-ai-discussion",
                 "🛡-cybersecurity",
                 "🌐-web-development",

@@ -23,6 +23,10 @@ function skip(name) {
     console.log(`- ${name} (already exists)`);
 }
 
+function warn(message) {
+    console.log(`⚠ ${message}`);
+}
+
 function done(message = "Setup Complete.") {
     console.log(`\n${message}`);
 }
@@ -36,6 +40,7 @@ module.exports = {
     step,
     success,
     skip,
+    warn,
     done,
     error
 };

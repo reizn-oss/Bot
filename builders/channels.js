@@ -1,4 +1,4 @@
-const { ChannelType } = require("discord.js");
+const { ChannelType, ForumLayoutType } = require("discord.js");
 
 const config = require("../config/serverConfig");
 const logger = require("../utils/logger");
@@ -77,7 +77,7 @@ module.exports = async (guild, categories) => {
         for (const rawChannel of cat.channels) {
 
             const channelConfig = normalizeChannel(rawChannel);
-            const { name: channelName } = channelConfig;
+            const { name: channelName, forum: isForum, tags } = channelConfig;
 
             const overwrites = computeChannelOverwrites(guild, cat, channelConfig);
             const needsExplicitOverwrite = !!overwrites;
@@ -90,6 +90,24 @@ module.exports = async (guild, categories) => {
                 );
 
                 if (channel) {
+
+                    // Discord's API has no way to convert a channel's type
+                    // after creation (text <-> forum). If the config now
+                    // wants a Forum channel but this one was created as
+                    // plain text (or vice versa), warn instead of silently
+                    // leaving it wrong — delete the channel manually and
+                    // re-run /setup to have it recreated with the right
+                    // type and tags.
+                    const wantsForum = !!isForum;
+                    const isActuallyForum = channel.type === ChannelType.GuildForum;
+
+                    if (wantsForum !== isActuallyForum) {
+                        logger.warn(
+                            `"${channelName}" exists as a ${isActuallyForum ? "Forum" : "Text"} channel but ` +
+                            `config now expects a ${wantsForum ? "Forum" : "Text"} channel. Discord can't convert ` +
+                            `channel types — delete "${channelName}" in Discord and re-run /setup to recreate it correctly.`
+                        );
+                    }
 
                     logger.skip(channelName);
 
@@ -105,12 +123,16 @@ module.exports = async (guild, categories) => {
 
                     channel = await guild.channels.create({
                         name: channelName,
-                        type: ChannelType.GuildText,
+                        type: isForum ? ChannelType.GuildForum : ChannelType.GuildText,
                         parent: category.id,
                         // No permissionOverwrites -> Discord syncs this
                         // channel's permissions with its parent category.
                         // Flagged channels get explicit overwrites instead.
-                        permissionOverwrites: overwrites
+                        permissionOverwrites: overwrites,
+                        ...(isForum ? {
+                            defaultForumLayout: ForumLayoutType.GalleryView,
+                            availableTags: (tags || []).map(name => ({ name }))
+                        } : {})
                     });
 
                     logger.success(channelName);
