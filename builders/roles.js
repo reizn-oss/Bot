@@ -14,6 +14,7 @@ function getAllRoleNames() {
         ...groups.yearLevel,
         ...groups.gamer,
         ...groups.notification,
+        ...groups.interest,
         ...groups.system
     ];
 
@@ -72,6 +73,10 @@ const ROLE_OPTIONS = {
     "📢 Announcements": { color: 0xE67E22 },
     "🎓 Academic Updates": { color: 0x3498DB },
     "📅 Events": { color: 0xE91E63 },
+
+    // ── Interest roles (pairs with 🎓 ACADEMIC HUB showcase channels) ──
+    "Innovator": { color: 0xF39C12 },
+    "Artist": { color: 0xE056FD },
 
     // ── System roles ────────────────────────────────────────────────────
     "Verified": { color: 0x2ECC71 },

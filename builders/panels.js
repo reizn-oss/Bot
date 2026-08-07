@@ -8,6 +8,7 @@ const {
 const config = require("../config/serverConfig");
 const logger = require("../utils/logger");
 const { buildFirstStepMessage } = require("../interactions/roleWizard");
+const { buildInterestMessage, PANEL_MARKER: INTEREST_PANEL_MARKER } = require("../interactions/interestPanel");
 
 // Marker used to detect a panel the bot already posted, so re-running
 // /setup doesn't spam duplicate panels into the channel.
@@ -104,6 +105,22 @@ async function postRoleWizardEntryPoint(guild, channel) {
 
 }
 
+// Posted as its own separate message in #role-select, completely
+// independent from the role wizard above (different footer marker, no
+// shared state, no multi-step flow — just two toggle buttons).
+async function postInterestPanel(guild, channel) {
+
+    const existing = await findExistingPanel(channel, (footer) => footer === INTEREST_PANEL_MARKER);
+    if (existing) {
+        logger.skip("interest panel");
+        return;
+    }
+
+    await channel.send(buildInterestMessage());
+    logger.success("interest panel");
+
+}
+
 async function postTicketPanel(guild, channel) {
 
     const footerText = `${PANEL_MARKER}:ticket`;
@@ -152,6 +169,7 @@ module.exports = async (guild, channelsByName) => {
 
     if (roleSelectChannel) {
         await postRoleWizardEntryPoint(guild, roleSelectChannel);
+        await postInterestPanel(guild, roleSelectChannel);
     }
 
     if (ticketPanelChannel) {

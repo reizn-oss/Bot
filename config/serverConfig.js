@@ -51,6 +51,13 @@ module.exports = {
             "📅 Events"
         ],
 
+        // Self-assignable interest roles (reaction roles, standalone panel —
+        // see interestPanel below). Each one gates its own showcase channel.
+        interest: [
+            "Innovator",
+            "Artist"
+        ],
+
         // Internal system roles, not shown in the role-select panel
         system: [
             "Verified",
@@ -124,7 +131,11 @@ module.exports = {
                 "💻-programming-help",
                 "📚-study-groups",
                 { name: "📖-learning-resources", chatRestrictedTo: TICKET_ROLES },
-                { name: "🖼-project-showcase", chatRestrictedTo: TICKET_ROLES },
+                // Hidden from everyone except staff until the matching
+                // interest role is picked from the 🎨 Interest Roles panel
+                // in #role-select — same gateRole pattern as 🎮 GAMING.
+                { name: "🖼-project-showcase", gateRole: "Innovator" },
+                { name: "🎨-art-showcase", gateRole: "Artist" },
                 "🤖-ai-discussion",
                 "🛡-cybersecurity",
                 "🌐-web-development",
@@ -292,6 +303,20 @@ module.exports = {
                     "Teamfight Tactics"
                 ]
             }
+        ]
+    },
+
+    // ── Interest role panel (posted in #role-select as its own, separate
+    // message — NOT a step of roleWizard above, and not linked to it in
+    // any way). Each button just toggles that one role on/off immediately
+    // and unlocks the matching showcase channel via gateRole.
+    interestPanel: {
+        title: "🎨 Interest Roles",
+        description: "Pick your interests to unlock extra channels below. Click a button again to remove it.",
+        color: 0x1ABC9C,
+        roles: [
+            { name: "Innovator", emoji: "🚀", unlocks: "🖼-project-showcase" },
+            { name: "Artist", emoji: "🎨", unlocks: "🎨-art-showcase" }
         ]
     },
 

@@ -3,6 +3,7 @@ const { createTicket, closeTicket } = require("../features/tickets");
 const { logAction } = require("../features/logging");
 const pollCommand = require("../commands/poll");
 const { handleWizardButton } = require("./roleWizard");
+const { handleInterestButton } = require("./interestPanel");
 
 async function handleVerifyButton(interaction) {
 
@@ -87,6 +88,10 @@ async function handleButtonInteraction(interaction) {
 
     if (customId.startsWith("wizard:")) {
         return handleWizardButton(interaction);
+    }
+
+    if (customId.startsWith("interest:")) {
+        return handleInterestButton(interaction);
     }
 
     if (customId === "ticket:create") {
