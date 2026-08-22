@@ -121,6 +121,60 @@ function isSpamming(userId) {
 }
 
 /**
+ * Attempts to time out a member and reports back exactly why it failed,
+ * instead of a generic "check role hierarchy and permission" guess.
+ * Used by both the severe-word path and the repeated-violation path so
+ * troubleshooting is identical everywhere the bot tries to timeout
+ * someone.
+ *
+ * Returns { ok: true } on success, or { ok: false, reason } with a
+ * specific, actionable reason on failure.
+ */
+async function attemptTimeout(message, minutes, auditReason) {
+
+    const guild = message.guild;
+
+    // message.member can be null even with GuildMembers intent enabled
+    // if Discord's cache dropped it (e.g. right after a restart, or a
+    // large server trimming its cache) — fetch it directly instead of
+    // silently treating "not cached" the same as "not moderatable".
+    let member = message.member;
+    if (!member) {
+        member = await guild.members.fetch(message.author.id).catch(() => null);
+    }
+
+    if (!member) {
+        return { ok: false, reason: "couldn't resolve the member who sent this message (they may have left the server, or my member cache is stale)." };
+    }
+
+    const me = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
+
+    if (!me) {
+        return { ok: false, reason: "couldn't resolve my own member object in this guild." };
+    }
+
+    if (member.id === guild.ownerId) {
+        return { ok: false, reason: "this member is the server owner — Discord never allows timing out the owner, no matter the bot's role or permissions." };
+    }
+
+    if (!me.permissions.has("ModerateMembers")) {
+        return { ok: false, reason: `I'm missing the **Timeout Members** permission. Fix: Server Settings → Roles → my role (${me.roles.highest.name}) → enable "Timeout Members".` };
+    }
+
+    if (member.roles.highest.position >= me.roles.highest.position) {
+        return { ok: false, reason: `my highest role (**${me.roles.highest.name}**) is not positioned above **${member.roles.highest.name}**, ${member.user.tag}'s highest role. Fix: Server Settings → Roles → drag my role above theirs (Discord's role hierarchy applies to timeouts even with Administrator).` };
+    }
+
+    try {
+        await member.timeout(minutes * 60 * 1000, auditReason);
+        return { ok: true };
+    } catch (err) {
+        return { ok: false, reason: `Discord rejected the timeout request: ${err.message}` };
+    }
+
+}
+
+/**
  * Tracks violations per user (persisted in SQLite so counts survive a
  * restart/redeploy) and auto-times-out ("limits") them once they cross
  * the configured threshold within the configured window. This is on top
@@ -143,18 +197,13 @@ async function trackViolationAndMaybeLimit(message) {
     // Reset the counter now that an escalation is firing.
     clearViolations(recent.map(v => v.id));
 
-    const member = message.member;
+    const result = await attemptTimeout(message, timeoutMinutes, "Automatic: repeated auto-mod violations");
 
-    if (!member || !member.moderatable) {
+    if (!result.ok) {
 
-        // This is the #1 cause of "auto-timeout doesn't seem to do
-        // anything" reports: the bot's own role sits below the member's
-        // highest role (or the bot lacks Timeout Members), so Discord
-        // silently refuses the timeout. Surface it instead of failing
-        // quietly so staff can actually fix the role order.
         await logAction(message.guild, {
             title: "⚠️ Auto-Timeout Failed",
-            description: `${message.author} crossed the auto-mod violation threshold (${recent.length} in ${Math.round(windowMs / 60000)} minute(s)), but I couldn't time them out — check that my role is above theirs and that I have the "Timeout Members" permission.`,
+            description: `${message.author} crossed the auto-mod violation threshold (${recent.length} in ${Math.round(windowMs / 60000)} minute(s)), but I couldn't time them out — ${result.reason}`,
             color: 0xED4245
         });
 
@@ -162,25 +211,11 @@ async function trackViolationAndMaybeLimit(message) {
 
     }
 
-    try {
-
-        await member.timeout(timeoutMinutes * 60 * 1000, "Automatic: repeated auto-mod violations");
-
-        await logAction(message.guild, {
-            title: "⏳ Auto-Timeout (Limited)",
-            description: `${member} was automatically timed out for ${timeoutMinutes} minute(s) after ${recent.length} violations in the last ${Math.round(windowMs / 60000)} minute(s). This expires on its own — Discord handles the countdown server-side, not the bot, so it lifts on schedule even through restarts/redeploys.`,
-            color: 0xED4245
-        });
-
-    } catch (err) {
-
-        await logAction(message.guild, {
-            title: "⚠️ Auto-Timeout Failed",
-            description: `${member} crossed the auto-mod violation threshold, but the timeout request itself errored: ${err.message}`,
-            color: 0xED4245
-        });
-
-    }
+    await logAction(message.guild, {
+        title: "⏳ Auto-Timeout (Limited)",
+        description: `${message.author} was automatically timed out for ${timeoutMinutes} minute(s) after ${recent.length} violations in the last ${Math.round(windowMs / 60000)} minute(s). This expires on its own — Discord handles the countdown server-side, not the bot, so it lifts on schedule even through restarts/redeploys.`,
+        color: 0xED4245
+    });
 
 }
 
@@ -233,21 +268,14 @@ async function handleSevereWord(message) {
     await notifyChannel(message, "vulgar/blocked word");
 
     const { timeoutMinutes } = config.automod.severeAction;
-    const member = message.member;
 
-    let timeoutApplied = false;
-
-    if (member && member.moderatable) {
-        await member.timeout(timeoutMinutes * 60 * 1000, "Automatic: hate speech / slur detected")
-            .then(() => { timeoutApplied = true; })
-            .catch(() => {});
-    }
+    const result = await attemptTimeout(message, timeoutMinutes, "Automatic: hate speech / slur detected");
 
     await logAction(message.guild, {
         title: "🚫 Hate Speech Detected",
-        description: timeoutApplied
+        description: result.ok
             ? `${message.author} was auto-timed-out for ${timeoutMinutes} minute(s) in ${message.channel} for using a slur/hate speech. This requires manual review — consider a kick/ban.`
-            : `${message.author} used a slur/hate speech in ${message.channel}, but I couldn't time them out automatically — check role hierarchy and my "Timeout Members" permission. **Manual action needed.**`,
+            : `${message.author} used a slur/hate speech in ${message.channel}, but I couldn't time them out automatically — ${result.reason} **Manual action needed.**`,
         color: 0x992D22
     });
 
