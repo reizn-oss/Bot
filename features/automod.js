@@ -16,6 +16,17 @@ const LEET_MAP = { "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "
 
 // Cleans one token: leetspeak -> letters, drop any leftover punctuation/
 // digits, then collapse letter-repeat spam ("gaaagooo" -> "gago").
+//
+// Only collapses runs of 3+ repeated letters, not 2+. A more aggressive
+// 2+ threshold was tried and reverted: several of the words we need to
+// match (e.g. "nigger", "coon", "faggot") contain a natural double
+// letter, and collapsing that away turns them into short, generic
+// strings that collide with completely innocent words — "coon" -> "con"
+// then matches inside "control"/"contact"/"continue", and "nigger" ->
+// "niger" then matches inside "Nigeria". Catching every possible
+// obfuscation isn't worth silently flagging normal conversation; the
+// leetspeak map + letter-by-letter spelling defense below still catch
+// the common evasions without this collateral damage.
 function cleanToken(token) {
 
     let t = token.split("").map(ch => LEET_MAP[ch] ?? ch).join("");
@@ -54,26 +65,44 @@ function normalize(content) {
 
 }
 
-function containsBannedWord(content) {
+// Strips allowlisted words first so a banned word that only appears as a
+// substring of a legitimate word (e.g. "puta" inside "reputation")
+// doesn't false-positive. Since normalize() preserves spaces between
+// real words, this can't accidentally eat a genuine banned word that
+// happens to share letters with an allowlisted one.
+function scrubAllowlisted(normalized) {
 
-    const normalized = normalize(content);
-
-    // Strip out allowlisted words first so a banned word that only
-    // appears as a substring of a legitimate word (e.g. "puta" inside
-    // "reputation") doesn't false-positive. Since normalize() preserves
-    // spaces between real words, this can't accidentally eat a genuine
-    // banned word that happens to share letters with an allowlisted one.
     let scrubbed = normalized;
     for (const safe of config.automod.profanityAllowlist || []) {
         const cleanSafe = normalize(safe);
         if (cleanSafe) scrubbed = scrubbed.split(cleanSafe).join("");
     }
+    return scrubbed;
 
-    return config.automod.bannedWords.some(word => {
+}
+
+function matchesWordList(content, wordList) {
+
+    const scrubbed = scrubAllowlisted(normalize(content));
+
+    return (wordList || []).some(word => {
         const cleanWord = normalize(word);
         return cleanWord && scrubbed.includes(cleanWord);
     });
 
+}
+
+function containsBannedWord(content) {
+    return matchesWordList(content, config.automod.bannedWords);
+}
+
+// Slurs/hate speech — checked separately from the regular profanity list
+// so it can get an immediate, harsher response instead of the normal
+// delete-and-count-toward-threshold flow. Goes through the exact same
+// normalize()/leetspeak/letter-repeat/allowlist pipeline as
+// containsBannedWord, so obfuscated variants are still caught.
+function containsSevereWord(content) {
+    return matchesWordList(content, config.automod.severeWords);
 }
 
 function isSpamming(userId) {
@@ -155,6 +184,42 @@ async function trackViolationAndMaybeLimit(message) {
 
 }
 
+/**
+ * Handles a slur/hate-speech hit: deletes the message, immediately times
+ * the member out (no threshold/warning grace period — one message is
+ * enough), and logs it distinctly from a normal auto-mod action so staff
+ * can spot it in #mod-logs at a glance.
+ */
+async function handleSevereWord(message) {
+
+    await message.delete().catch(() => {});
+
+    const { timeoutMinutes } = config.automod.severeAction;
+    const member = message.member;
+
+    let timeoutApplied = false;
+
+    if (member && member.moderatable) {
+        await member.timeout(timeoutMinutes * 60 * 1000, "Automatic: hate speech / slur detected")
+            .then(() => { timeoutApplied = true; })
+            .catch(() => {});
+    }
+
+    await logAction(message.guild, {
+        title: "🚫 Hate Speech Detected",
+        description: timeoutApplied
+            ? `${message.author} was auto-timed-out for ${timeoutMinutes} minute(s) in ${message.channel} for using a slur/hate speech. This requires manual review — consider a kick/ban.`
+            : `${message.author} used a slur/hate speech in ${message.channel}, but I couldn't time them out automatically — check role hierarchy and my "Timeout Members" permission. **Manual action needed.**`,
+        color: 0x992D22
+    });
+
+    // Also feed it into the regular violation tracker, so a repeat
+    // offender still escalates toward /ban even if staff don't act on
+    // the log above right away.
+    await trackViolationAndMaybeLimit(message);
+
+}
+
 async function warn(message, reason) {
 
     await message.delete().catch(() => {});
@@ -184,11 +249,18 @@ async function handleMessage(message) {
     if (message.author.bot) return;
     if (!message.guild) return;
 
-    // Staff are exempt
-    const isStaff = message.member?.roles.cache.some(r =>
-        config.staffRoles.includes(r.name)
-    );
-    if (isStaff) return;
+    // No role exemption: automod runs on every member's messages,
+    // staff included. Note that Discord itself still refuses to time
+    // out anyone with the Administrator permission (that's enforced
+    // server-side by Discord, not by this bot), so a true Administrator
+    // will still show up as a "couldn't time out — manual action
+    // needed" log entry rather than actually being muted; every other
+    // role, including Student Council/Computer Society, is fully in
+    // scope.
+
+    if (containsSevereWord(message.content)) {
+        return handleSevereWord(message);
+    }
 
     if (containsBannedWord(message.content)) {
         return warn(message, "vulgar/blocked word");

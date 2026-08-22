@@ -15,8 +15,13 @@ module.exports = {
 
     async execute(interaction) {
 
-        const target = interaction.options.getMember("user");
+        const user = interaction.options.getUser("user");
         const reason = interaction.options.getString("reason") || "No reason provided";
+
+        // See timeout.js for why this fetches instead of using
+        // getMember() — getMember() can hand back a partial object with
+        // no .kickable/.kick() when the member isn't already cached.
+        const target = await interaction.guild.members.fetch(user.id).catch(() => null);
 
         if (!target) {
             return interaction.reply({ content: "❌ That user isn't in this server.", flags: 64 });

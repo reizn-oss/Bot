@@ -23,9 +23,17 @@ module.exports = {
 
     async execute(interaction) {
 
-        const target = interaction.options.getMember("user");
+        const user = interaction.options.getUser("user");
         const minutes = interaction.options.getInteger("minutes");
         const reason = interaction.options.getString("reason") || "No reason provided";
+
+        // Always fetch the real GuildMember instead of relying on
+        // getMember(), which silently returns a bare partial object
+        // (no .moderatable, no .timeout()) whenever the member isn't
+        // already sitting in the client's cache. That partial-object
+        // case was the #1 reason /timeout would appear to "do nothing"
+        // or throw "target.timeout is not a function".
+        const target = await interaction.guild.members.fetch(user.id).catch(() => null);
 
         if (!target) {
             return interaction.reply({ content: "❌ That user isn't in this server.", flags: 64 });

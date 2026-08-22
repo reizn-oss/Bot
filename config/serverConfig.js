@@ -335,18 +335,63 @@ module.exports = {
     // ── Auto moderation ──────────────────────────────────────────────
     automod: {
         enabled: true,
-        // Starter profanity list — expand freely in this array. Kept
-        // short here; swap in whatever word list fits your community.
+        // Broad profanity list — expand freely in this array.
+        //
+        // A few short/common words were deliberately left OUT even
+        // though they're vulgar in isolation, because plain substring
+        // matching can't tell them apart from harmless words that
+        // happen to contain them, and a CCIS server talks about these
+        // constantly:
+        //   "ass"  -> would fire on "class", "assignment", "assessment"
+        //   "hoe"  -> would fire on "shoe"
+        //   "cum"  -> would fire on "document", "cumulative"
+        //   "twit" -> would fire on "Twitter"/"Twitch"
+        //   "bugger" -> would fire on "debugger"
+        // Their compound/unambiguous forms (asshole, dumbass, jackass,
+        // whore, etc.) ARE included below since those don't collide.
         bannedWords: [
+            // English
             "fuck",
+            "fucker",
+            "fucking",
+            "motherfucker",
             "shit",
+            "bullshit",
+            "shithead",
             "bitch",
             "asshole",
+            "asswipe",
+            "jackass",
+            "dumbass",
             "bastard",
             "dick",
+            "dickhead",
+            "cock",
+            "cunt",
+            "pussy",
+            "twat",
+            "prick",
+            "wanker",
+            "bollocks",
+            "slut",
+            "whore",
+            "skank",
+            "douche",
+            "douchebag",
+            "dipshit",
+            "piss",
+            "pissed",
+            "goddamn",
+            "damn it",
+            "jerkoff",
+            "nutsack",
+            "dildo",
+
+            // Tagalog / Filipino
             "puta",
             "putangina",
             "putanginamo",
+            "putanginang",
             "gago",
             "gagoh",
             "gaguh",
@@ -362,13 +407,25 @@ module.exports = {
             "pakyu",
             "pakshet",
             "hayop ka",
-            "peste"
+            "peste",
+            "kupal",
+            "engot",
+            "siraulo",
+            "yawa",
+            "buwisit",
+            "hudas",
+            "walanghiya",
+            "animal ka",
+            "tarantado",
+            "lintik",
+            "bwisit",
+            "putris"
         ],
-        // Words/phrases that would otherwise trip a bannedWords match as a
-        // false positive (e.g. "puta" inside "reputation", "dick" inside
-        // "Dickinson") — matched and stripped out *before* the banned-word
-        // check runs. Add to this list whenever a legitimate word collides
-        // with something in bannedWords.
+        // Words/phrases that would otherwise trip a bannedWords/severeWords
+        // match as a false positive (e.g. "puta" inside "reputation",
+        // "spic" inside "spicy") — matched and stripped out *before* the
+        // word-list check runs. Add to this list whenever a legitimate
+        // word collides with something in bannedWords or severeWords.
         profanityAllowlist: [
             "reputation",
             "reputable",
@@ -377,8 +434,58 @@ module.exports = {
             "disputable",
             "disputation",
             "dickinson",
-            "dickens"
+            "dickens",
+            "cockpit",
+            "cocktail",
+            "peacock",
+            "cockroach",
+            "shuttlecock",
+            "prickly",
+            "prickle",
+            "prickling",
+            "scunthorpe",
+            "spicy",
+            "spice",
+            "spices",
+            "spiced",
+            "conspicuous",
+            "despicable",
+            "retardant",
+            "raccoon",
+            "raccoons"
         ],
+        // Zero-tolerance tier: racial/ethnic/homophobic slurs and other
+        // hate speech, kept separate from the regular bannedWords list
+        // above because these get an immediate hard response (delete +
+        // instant timeout, see automod.js) instead of just delete +
+        // count-toward-threshold. Only base spellings are needed here —
+        // normalize()/cleanToken() in automod.js already defeats
+        // leetspeak (n1gg3r), letter-padding (niiggeerr), and
+        // spelling-it-out-letter-by-letter (n i g g e r) before matching,
+        // so you don't need to enumerate every obfuscation by hand.
+        severeWords: [
+            "nigger",
+            "nigga",
+            "niggers",
+            "niggas",
+            "faggot",
+            "faggots",
+            "chink",
+            "spic",
+            "retard",
+            "retarded",
+            "tranny",
+            "dyke",
+            "gook",
+            "kike",
+            "wetback",
+            "coon"
+        ],
+        severeAction: {
+            // Duration of the automatic timeout applied the *first* time
+            // a severe word is caught, on top of deleting the message.
+            timeoutMinutes: 60
+        },
         blockInviteLinks: true,
         maxMentionsPerMessage: 5,
         // Simple spam guard: N messages within windowMs from the same user
