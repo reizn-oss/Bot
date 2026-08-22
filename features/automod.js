@@ -184,6 +184,40 @@ async function trackViolationAndMaybeLimit(message) {
 
 }
 
+// Delay (ms) before we actually delete a flagged message.
+//
+// Deleting a message immediately (same tick as MESSAGE_CREATE) races
+// against Discord's own client-side echo: when you send a message, your
+// client shows it right away using a local nonce, then swaps it for the
+// "real" message once the gateway confirms it. If our MESSAGE_DELETE
+// reaches Discord before every client has finished that swap, the
+// *author's own* client can be left showing a message that everyone
+// else already sees as gone — which is exactly the "removed for others
+// but not for me" symptom. A short delay here gives that swap time to
+// finish everywhere before we delete, so the removal renders correctly
+// on the sender's screen too, not just other members'.
+const DELETE_DELAY_MS = 800;
+
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function deleteFlaggedMessage(message) {
+    await delay(DELETE_DELAY_MS);
+    await message.delete().catch(() => {});
+}
+
+// Public, in-channel notice shown for every automod deletion — used by
+// both the regular warn() path and the severe/slur path so members get
+// the exact same feedback regardless of which list their message
+// tripped. Auto-deletes itself after 6s either way.
+async function notifyChannel(message, reason) {
+    await message.channel.send({
+        content: `${message.author}, your message was removed: **${reason}**`
+    }).then(m => setTimeout(() => m.delete().catch(() => {}), 6000))
+      .catch(() => {});
+}
+
 /**
  * Handles a slur/hate-speech hit: deletes the message, immediately times
  * the member out (no threshold/warning grace period — one message is
@@ -192,7 +226,11 @@ async function trackViolationAndMaybeLimit(message) {
  */
 async function handleSevereWord(message) {
 
-    await message.delete().catch(() => {});
+    await deleteFlaggedMessage(message);
+
+    // Same public notice a regular banned-word hit gets, so the warning
+    // experience is consistent no matter which list caught the message.
+    await notifyChannel(message, "vulgar/blocked word");
 
     const { timeoutMinutes } = config.automod.severeAction;
     const member = message.member;
@@ -222,12 +260,9 @@ async function handleSevereWord(message) {
 
 async function warn(message, reason) {
 
-    await message.delete().catch(() => {});
+    await deleteFlaggedMessage(message);
 
-    await message.channel.send({
-        content: `${message.author}, your message was removed: **${reason}**`
-    }).then(m => setTimeout(() => m.delete().catch(() => {}), 6000))
-      .catch(() => {});
+    await notifyChannel(message, reason);
 
     await logAction(message.guild, {
         title: "🛡️ Auto-mod Action",

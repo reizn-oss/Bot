@@ -77,8 +77,8 @@ module.exports = function startKeepAliveServer() {
         res.writeHead(200, { "Content-Type": "text/plain" });
         res.end("InfoCore Bot is alive.");
 
-    }).listen(port, () => {
-        console.log(`🌐 Keep-alive server listening on port ${port}`);
+    }).listen(port, "0.0.0.0", () => {
+        console.log(`🌐 Keep-alive server listening on 0.0.0.0:${port} — point UptimeRobot (HTTP(s) monitor, 5 min interval) at this Render service's public URL.`);
     });
 
 };

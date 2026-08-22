@@ -38,12 +38,17 @@ process.on('uncaughtException', (err) => {
     console.error('Uncaught exception:', err);
 });
 
-// Optional tiny HTTP server so free/sleep-prone hosts (e.g. Replit) can be
-// pinged awake by an uptime monitor. Not needed on a VPS/pm2 setup — only
-// starts if ENABLE_KEEPALIVE=true is set in .env.
-if (process.env.ENABLE_KEEPALIVE === 'true') {
-    require('./keepAlive')();
-}
+// Tiny HTTP server so UptimeRobot (or any uptime monitor) has something
+// to ping, and so Render's Web Service health check sees an open port.
+//
+// This used to be gated behind ENABLE_KEEPALIVE=true, read from .env —
+// but .env is in .gitignore, so that flag only ever existed locally and
+// was never actually pushed to Render. On Render itself the env var was
+// unset, ENABLE_KEEPALIVE !== 'true', and the server never started at
+// all — which is exactly why UptimeRobot had nothing to ping. Starting
+// it unconditionally fixes that; it's a no-op localhost server, so there's
+// no downside to always running it.
+require('./keepAlive')();
 
 const client = new Client({
     intents: [

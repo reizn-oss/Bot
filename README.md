@@ -242,14 +242,17 @@ npm run pm2:restart    # restart after pulling code changes
 backoff so a bad token doesn't loop forever) and cap memory usage.
 
 **Alternative: a free/sleep-prone host + uptime pings**
-Platforms like Replit's free tier spin down when idle. If you use one of
-these, set `ENABLE_KEEPALIVE=true` in `.env` to start a tiny HTTP server
-(`keepAlive.js`), then point a free monitor like
-[UptimeRobot](https://uptimerobot.com/) or
-[cron-job.org](https://cron-job.org/) at your app's URL every 5 minutes to
-keep it awake. This is less reliable than a real always-on host — Discord
-bots that go to sleep will miss messages and drop their gateway
-connection until pinged back awake.
+Platforms like Replit's or Render's free tier spin down when idle.
+`index.js` always starts a tiny HTTP server (`keepAlive.js`) for this —
+point a free monitor like [UptimeRobot](https://uptimerobot.com/) or
+[cron-job.org](https://cron-job.org/) at your Render service's public URL
+(the `https://your-app.onrender.com` one, not a `/mnt` path) every 5
+minutes to keep it awake. Make sure the Render service is a **Web
+Service** (not a Background Worker) — only Web Services get a public URL
+for UptimeRobot to hit, and Render assigns `PORT` automatically for
+those. This is less reliable than a real always-on host — Discord bots
+that go to sleep will miss messages and drop their gateway connection
+until pinged back awake.
 
 Either way, `index.js` already has `unhandledRejection`/`uncaughtException`
 handlers so one bad promise doesn't crash the whole process, and
