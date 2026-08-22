@@ -253,10 +253,65 @@ if (!rawToken) {
     console.error('❌ TOKEN is missing/empty in this environment. The process will now attempt login and fail — check the Environment tab on Render for a variable named exactly "TOKEN" (no extra spaces in the name).');
 }
 
+// REST self-check: hits Discord's REST API directly (no WebSocket/gateway
+// involved) with this token, BEFORE attempting the gateway login. This
+// isolates "is the token itself valid" from "is the gateway handshake
+// hanging" — the two symptoms look identical from the outside (silence in
+// the logs) but need completely different fixes. This call cannot hang
+// the way the gateway can; it either gets an HTTP response or it doesn't.
+async function restSelfCheck() {
+    if (!rawToken) return;
+    try {
+        const res = await fetch('https://discord.com/api/v10/users/@me', {
+            headers: { Authorization: `Bot ${rawToken}` }
+        });
+        if (res.ok) {
+            const me = await res.json();
+            console.log(`🌐 REST self-check OK — token is valid for application "${me.username}" (id ${me.id}). If the gateway still hangs after this, the token is fine and the problem is specifically the WebSocket handshake (duplicate session, network/proxy block, or Discord-side outage).`);
+        } else {
+            console.error(`🌐 REST self-check FAILED — Discord's API rejected this token with HTTP ${res.status} ${res.statusText}. This means the TOKEN value set in this environment is wrong/stale (not a gateway or intents issue) — go back to the Developer Portal → Bot page and click "Reset Token", then update it on Render.`);
+        }
+    } catch (err) {
+        console.error('🌐 REST self-check errored (network issue reaching Discord\'s API from this environment):', err);
+    }
+}
+
 console.log('🔐 Attempting Discord login...');
+restSelfCheck();
+
+// Watchdog: client.login() can hang forever with ZERO error output if the
+// gateway handshake never completes — most commonly because a privileged
+// intent this bot requests (GuildMembers / MessageContent) is toggled OFF
+// in the Discord Developer Portal (Bot page → Privileged Gateway Intents),
+// or because another running instance is holding/conflicting with the
+// session for this same token. Neither of those rejects the login()
+// promise, so without this timer the logs just stop after "Attempting
+// Discord login..." with no indication of what's wrong.
+let loginSettled = false;
+
+const loginWatchdog = setTimeout(() => {
+    if (!loginSettled) {
+        console.error(
+            '⏱️ Still not logged in 20s after calling client.login(). ' +
+            'This almost always means one of: (1) a privileged intent ' +
+            '(SERVER MEMBERS INTENT / MESSAGE CONTENT INTENT) is disabled ' +
+            'in the Discord Developer Portal for this bot, (2) another ' +
+            'process/deploy is already running with this same TOKEN, or ' +
+            '(3) the TOKEN in this environment is stale/invalid in a way ' +
+            'that did not raise a rejection. The process will keep running ' +
+            'in case it eventually connects, but treat this as a real problem.'
+        );
+    }
+}, 20_000);
 
 client.login(rawToken)
-    .then(() => console.log('✅ login() resolved — waiting for ClientReady...'))
+    .then(() => {
+        loginSettled = true;
+        clearTimeout(loginWatchdog);
+        console.log('✅ login() resolved — waiting for ClientReady...');
+    })
     .catch(err => {
+        loginSettled = true;
+        clearTimeout(loginWatchdog);
         console.error('❌ client.login() rejected:', err);
     });
