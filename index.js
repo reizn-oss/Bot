@@ -268,6 +268,10 @@ async function restSelfCheck() {
         if (res.ok) {
             const me = await res.json();
             console.log(`🌐 REST self-check OK — token is valid for application "${me.username}" (id ${me.id}). If the gateway still hangs after this, the token is fine and the problem is specifically the WebSocket handshake (duplicate session, network/proxy block, or Discord-side outage).`);
+        } else if (res.status === 429) {
+            const retryAfter = res.headers.get('retry-after');
+            const body = await res.text().catch(() => '');
+            console.error(`🌐 REST self-check RATE LIMITED — Discord returned HTTP 429 for this token/IP. Retry-After: ${retryAfter ?? 'not provided'} seconds. Body: ${body}. This is NOT a bad token — it means Discord (or Render's shared outbound IP, which other apps also use) is throttling requests. This commonly happens after several rapid redeploys/restarts in a short window. Fix: stop redeploying for a few minutes and let the limit clear, then deploy once and leave it running — do not repeatedly restart to "test" while rate limited, as that resets the backoff.`);
         } else {
             console.error(`🌐 REST self-check FAILED — Discord's API rejected this token with HTTP ${res.status} ${res.statusText}. This means the TOKEN value set in this environment is wrong/stale (not a gateway or intents issue) — go back to the Developer Portal → Bot page and click "Reset Token", then update it on Render.`);
         }
