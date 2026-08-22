@@ -242,4 +242,21 @@ client.on(Events.MessageUpdate, (oldMessage, newMessage) => {
     handleMessageUpdate(oldMessage, newMessage).catch(err => console.error("message log error:", err));
 });
 
-client.login(process.env.TOKEN);
+// Sanity-check + explicit success/failure logging around login, so a bad
+// or missing token shows up clearly in the deploy logs instead of just
+// silently never reaching ClientReady. This does NOT print the token
+// itself anywhere — only its length — so it's safe to leave in logs.
+const rawToken = process.env.TOKEN;
+console.log(`🔑 TOKEN env var present: ${Boolean(rawToken)}, length: ${rawToken ? rawToken.length : 0}`);
+
+if (!rawToken) {
+    console.error('❌ TOKEN is missing/empty in this environment. The process will now attempt login and fail — check the Environment tab on Render for a variable named exactly "TOKEN" (no extra spaces in the name).');
+}
+
+console.log('🔐 Attempting Discord login...');
+
+client.login(rawToken)
+    .then(() => console.log('✅ login() resolved — waiting for ClientReady...'))
+    .catch(err => {
+        console.error('❌ client.login() rejected:', err);
+    });
